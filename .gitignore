@@ -93,3 +93,7 @@ docs/_build/
 # Configuration files with sensitive data
 *config*.json
 !examples/*config*.json
+
+# Personal/local usage notes (may contain private spreadsheet IDs)
+USAGE_UA.md
+client_secret_*.json
