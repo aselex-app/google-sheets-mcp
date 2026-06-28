@@ -51,7 +51,7 @@ A comprehensive Model Context Protocol (MCP) server for Google Sheets integratio
 For completely automated installation including Claude CLI configuration, slash commands, and authentication setup:
 
 ```bash
-git clone https://github.com/ryanrobson/claude-google-sheets-mcp.git
+git clone https://github.com/aselex-app/claude-google-sheets-mcp.git
 cd claude-google-sheets-mcp
 ./install-claude-cli.sh
 ```
@@ -69,7 +69,7 @@ If you prefer step-by-step control:
 
 1. **Clone the repository**:
    ```bash
-   git clone https://github.com/ryanrobson/claude-google-sheets-mcp.git
+   git clone https://github.com/aselex-app/claude-google-sheets-mcp.git
    cd claude-google-sheets-mcp
    ```
 
@@ -137,6 +137,22 @@ For faster access to common operations:
 
 The Google Sheets MCP server supports **all Google account types** and provides an interactive setup wizard to guide you through the authentication process.
 
+### Requested OAuth Scopes (Least Privilege)
+
+This server follows the **principle of least privilege** and requests only the
+minimum scopes needed to work with spreadsheets:
+
+| Scope | Why it's needed |
+|-------|-----------------|
+| `openid`, `userinfo.email` | Identify the authenticated account |
+| `…/auth/spreadsheets` | **Read and write** any spreadsheet you have access to |
+| `…/auth/drive.metadata.readonly` | List/search spreadsheets and read their metadata |
+
+> ⚠️ This server **does not** request the broad `…/auth/drive` scope. It can
+> read and write your spreadsheets, but it **cannot** read, modify, or delete
+> any other (non-spreadsheet) files in your Google Drive. The consent screen
+> will reflect exactly these limited permissions.
+
 ### Quick Setup (Recommended)
 
 Run the interactive setup wizard:
@@ -167,7 +183,7 @@ The wizard will:
 #### 🌐 Application Default Credentials (Best for GCP users)
 - Uses existing `gcloud` authentication
 - Perfect if you're already using Google Cloud Platform
-- Quick setup with: `gcloud auth application-default login --scopes="https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive"`
+- Quick setup with: `gcloud auth application-default login --scopes="https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive.metadata.readonly"`
 
 ### Manual Setup (Advanced)
 
@@ -210,7 +226,7 @@ claude-google-sheets-mcp/
 ### Setup Development Environment
 
 ```bash
-git clone https://github.com/ryanrobson/claude-google-sheets-mcp.git
+git clone https://github.com/aselex-app/claude-google-sheets-mcp.git
 cd claude-google-sheets-mcp
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -261,10 +277,16 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 ## 🔒 Security & Privacy
 
 - **No data storage**: This server doesn't store your spreadsheet data
-- **Credential security**: Uses Google's official authentication libraries
-- **Minimal permissions**: Requests only necessary API scopes
+- **Credential security**: Uses Google's official authentication libraries; the
+  credentials directory is created with `0700` and `token.json` is written with
+  `0600` (owner-only) permissions
+- **Least privilege**: Requests only `spreadsheets` (read/write) and
+  `drive.metadata.readonly` — never full Drive access
 - **Local processing**: All operations performed locally
-- **Audit trail**: All API calls logged for debugging
+- **Log hygiene**: Spreadsheet cell data (`values`) is redacted from logs, and
+  internal error details are kept in server logs rather than returned to clients
+- **Input safety**: User-supplied search terms are escaped before being placed
+  into Google Drive queries
 
 See [SECURITY.md](SECURITY.md) for detailed security information.
 
@@ -301,13 +323,13 @@ See [SECURITY.md](SECURITY.md) for detailed security information.
 **"Insufficient permissions"**
 - For Application Default Credentials, ensure you have the right scopes:
   ```bash
-  gcloud auth application-default login --scopes="https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive"
+  gcloud auth application-default login --scopes="https://www.googleapis.com/auth/spreadsheets,https://www.googleapis.com/auth/drive.metadata.readonly"
   ```
 - For service accounts, ensure the service account email has been granted access to your spreadsheets
 
 ### Getting Help
 
-1. Check the [Issues](https://github.com/ryanrobson/claude-google-sheets-mcp/issues) page
+1. Check the [Issues](https://github.com/aselex-app/claude-google-sheets-mcp/issues) page
 2. Review [SLASH_COMMANDS.md](SLASH_COMMANDS.md) for usage examples
 3. Enable debug logging: `--debug` flag
 4. Join discussions in the repository
@@ -325,9 +347,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/ryanrobson/claude-google-sheets-mcp/issues)
-- 💬 **Discussions**: [GitHub Discussions](https://github.com/ryanrobson/claude-google-sheets-mcp/discussions)
-- 📖 **Documentation**: [Wiki](https://github.com/ryanrobson/claude-google-sheets-mcp/wiki)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/aselex-app/claude-google-sheets-mcp/issues)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/aselex-app/claude-google-sheets-mcp/discussions)
+- 📖 **Documentation**: [Wiki](https://github.com/aselex-app/claude-google-sheets-mcp/wiki)
 
 ---
 
