@@ -153,6 +153,10 @@ For faster access to common operations:
 
 The Google Sheets MCP server supports **all Google account types** and provides an interactive setup wizard to guide you through the authentication process.
 
+> 👉 **New here? Read [docs/CONNECT_GOOGLE_ACCOUNT.md](docs/CONNECT_GOOGLE_ACCOUNT.md)** —
+> a complete step-by-step walkthrough: getting a `credentials.json` from Google
+> Cloud, connecting your account via OAuth, and wiring the server into Claude.
+
 ### Requested OAuth Scopes (Least Privilege)
 
 This server follows the **principle of least privilege** and requests only the
