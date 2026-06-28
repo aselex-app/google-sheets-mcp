@@ -36,10 +36,21 @@ class SheetsToolHandler(ABC):
             raise ValueError(f"Missing required arguments: {', '.join(missing_args)}")
 
     def format_error_response(self, error: Exception) -> List[TextContent]:
-        """Format an error as a response."""
-        error_message = f"Error in {self.name}: {str(error)}"
-        self.logger.error(error_message)
-        return [TextContent(type="text", text=error_message)]
+        """Format an error as a response.
+
+        Повний текст помилки (з можливими внутрішніми деталями) пишемо лише в
+        лог із трейсбеком; клієнту віддаємо узагальнене повідомлення.
+        """
+        self.logger.exception(f"Error in {self.name}")
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"Error in {self.name}: {type(error).__name__}. "
+                    "See server logs for details."
+                ),
+            )
+        ]
 
     def format_success_response(
         self, data: Any, message: Optional[str] = None

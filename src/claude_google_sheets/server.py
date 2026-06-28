@@ -65,7 +65,14 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict[str, Any]) -> Sequence[TextContent]:
     """Execute a tool with the given arguments."""
     try:
-        logger.info(f"Executing tool: {name} with arguments: {arguments}")
+        # Не логуємо сирі дані таблиць (можуть містити PII/секрети) — маскуємо
+        # обʼємні/чутливі поля, лишаючи решту для діагностики.
+        _SENSITIVE_KEYS = {"values"}
+        safe_arguments = {
+            key: ("<redacted>" if key in _SENSITIVE_KEYS else value)
+            for key, value in arguments.items()
+        }
+        logger.info(f"Executing tool: {name} with arguments: {safe_arguments}")
 
         if name not in tool_handlers:
             error_msg = f"Unknown tool: {name}"
@@ -85,10 +92,18 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> Sequence[TextConten
         logger.error(error_msg)
         return [TextContent(type="text", text=error_msg)]
 
-    except Exception as e:
-        error_msg = f"Unexpected error executing tool {name}: {str(e)}"
-        logger.error(error_msg)
-        return [TextContent(type="text", text=error_msg)]
+    except Exception:
+        # Повні деталі (зокрема внутрішні шляхи/стек) — лише в лог, не клієнту.
+        logger.exception(f"Unexpected error executing tool {name}")
+        return [
+            TextContent(
+                type="text",
+                text=(
+                    f"An unexpected error occurred while executing tool '{name}'. "
+                    "See server logs for details."
+                ),
+            )
+        ]
 
 
 def setup_auth(credentials_dir: str = None) -> GoogleSheetsAuth:

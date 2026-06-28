@@ -94,46 +94,39 @@ configure_claude_cli() {
         echo "✅ Backed up existing config"
     fi
 
-    # Read existing config or create new one
-    local existing_config="{}"
-    if [ -f "$claude_config_path" ]; then
-        existing_config=$(cat "$claude_config_path")
-    fi
-
-    # Create MCP server configuration
-    local mcp_config=$(cat << EOF
-{
-  "mcpServers": {
-    "google-sheets": {
-      "command": "$SCRIPT_DIR/venv/bin/python",
-      "args": [
-        "-m",
-        "claude_google_sheets.server"
-      ]
-    }
-  }
-}
-EOF
-    )
-
-    # Merge configurations using Python
-    python3 << EOF
+    # Merge configuration using Python.
+    #
+    # ВАЖЛИВО: дані (шлях до конфіга, шлях до python) передаються через
+    # змінні оточення, а наявний конфіг читається всередині Python із файлу.
+    # Жодні значення НЕ інтерполюються у тіло скрипта — це унеможливлює
+    # ін'єкцію коду через вміст конфіга чи спецсимволи у шляхах.
+    CLAUDE_CONFIG_PATH="$claude_config_path" \
+    MCP_PYTHON="$SCRIPT_DIR/venv/bin/python" \
+    python3 - <<'EOF'
 import json
+import os
 import sys
 
+config_path = os.environ["CLAUDE_CONFIG_PATH"]
+mcp_python = os.environ["MCP_PYTHON"]
+
 try:
-    # Read existing config
-    existing = json.loads('''$existing_config''')
-    new_mcp = json.loads('''$mcp_config''')
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            existing = json.load(f)
+    else:
+        existing = {}
 
-    # Merge MCP servers
-    if 'mcpServers' not in existing:
-        existing['mcpServers'] = {}
+    if not isinstance(existing, dict):
+        raise ValueError("Existing config is not a JSON object")
 
-    existing['mcpServers']['google-sheets'] = new_mcp['mcpServers']['google-sheets']
+    existing.setdefault("mcpServers", {})
+    existing["mcpServers"]["google-sheets"] = {
+        "command": mcp_python,
+        "args": ["-m", "claude_google_sheets.server"],
+    }
 
-    # Write updated config
-    with open('$claude_config_path', 'w') as f:
+    with open(config_path, "w") as f:
         json.dump(existing, f, indent=2)
 
     print("✅ Claude CLI configuration updated")

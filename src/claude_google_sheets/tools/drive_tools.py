@@ -2,16 +2,31 @@
 
 import json
 import logging
+import re
 from typing import Any, Dict, List, Optional
 
 from googleapiclient.errors import HttpError
 from mcp.types import TextContent, Tool
 
 from ..auth.oauth_manager import GoogleSheetsAuth
-from ..core.exceptions import AuthenticationError, DriveAPIError
+from ..core.exceptions import AuthenticationError, DriveAPIError, InvalidRangeError
 from ..core.tool_handler import SheetsToolHandler
 
 logger = logging.getLogger(__name__)
+
+
+def _escape_query_value(value: str) -> str:
+    """Екранувати рядок для безпечної вставки у Google Drive query (`q`).
+
+    Drive query language обмежує рядкові літерали одинарними лапками. Без
+    екранування символи `'` та `\\` дозволяють вийти з літерала й інжектити
+    додаткові клаузи (query injection). Екрануємо зворотний слеш і апостроф.
+    """
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
+# Простий валідатор дати у форматі YYYY-MM-DD для часових фільтрів.
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 class ListSpreadsheetsHandler(SheetsToolHandler):
@@ -68,7 +83,7 @@ class ListSpreadsheetsHandler(SheetsToolHandler):
             search_parts.append("trashed=false")
 
             if query:
-                search_parts.append(f"name contains '{query}'")
+                search_parts.append(f"name contains '{_escape_query_value(query)}'")
 
             search_query = " and ".join(search_parts)
 
@@ -189,15 +204,27 @@ class SearchSpreadsheetsHandler(SheetsToolHandler):
             search_parts.append("trashed=false")
 
             if name_contains:
-                search_parts.append(f"name contains '{name_contains}'")
+                search_parts.append(
+                    f"name contains '{_escape_query_value(name_contains)}'"
+                )
 
             if owner_email:
-                search_parts.append(f"'{owner_email}' in owners")
+                search_parts.append(
+                    f"'{_escape_query_value(owner_email)}' in owners"
+                )
 
             if created_after:
+                if not _DATE_RE.match(created_after):
+                    raise InvalidRangeError(
+                        "created_after must be in YYYY-MM-DD format"
+                    )
                 search_parts.append(f"createdTime > '{created_after}T00:00:00'")
 
             if modified_after:
+                if not _DATE_RE.match(modified_after):
+                    raise InvalidRangeError(
+                        "modified_after must be in YYYY-MM-DD format"
+                    )
                 search_parts.append(f"modifiedTime > '{modified_after}T00:00:00'")
 
             if shared_only:

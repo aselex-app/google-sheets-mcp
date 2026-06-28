@@ -15,21 +15,39 @@ from ..core.exceptions import AuthenticationError, ConfigurationError
 
 logger = logging.getLogger(__name__)
 
-# Required Google API scopes for Sheets and Drive access
+# Required Google API scopes for Sheets and Drive access.
+#
+# Принцип найменших привілеїв: сервер працює лише з таблицями, тож йому НЕ
+# потрібен повний доступ до Drive. `drive.metadata.readonly` достатньо для
+# list/search/get_spreadsheet_info (читання метаданих файлів), а `spreadsheets`
+# покриває читання/запис самих даних таблиць.
 SHEETS_SCOPES = [
     # Basic authentication
     "openid",
     "https://www.googleapis.com/auth/userinfo.email",
-    # Google Sheets API
+    # Google Sheets API (read/write cell data)
     "https://www.googleapis.com/auth/spreadsheets",
-    # Google Drive API (for listing and managing spreadsheets)
-    "https://www.googleapis.com/auth/drive",
-    "https://www.googleapis.com/auth/drive.file",
-    "https://www.googleapis.com/auth/drive.readonly",
+    # Google Drive API — лише метадані для пошуку/переліку таблиць
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
 ]
 
 # Default credentials directory
 DEFAULT_CREDENTIALS_DIR = os.path.expanduser("~/.config/google-sheets-mcp")
+
+
+def _write_secret_file(path: str, content: str) -> None:
+    """Записати чутливий файл (токен) з правами 0600 — лише власник."""
+    # O_CREAT з режимом 0600 застосовує права лише при створенні файлу,
+    # тож на наявному файлі додатково виставляємо chmod.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(content)
+    finally:
+        try:
+            os.chmod(path, 0o600)
+        except OSError as e:
+            logger.warning(f"Could not set permissions on {path}: {e}")
 
 
 class GoogleSheetsAuth:
@@ -39,8 +57,13 @@ class GoogleSheetsAuth:
         self.credentials_dir = credentials_dir or os.getenv(
             "GOOGLE_CREDENTIALS_DIR", DEFAULT_CREDENTIALS_DIR
         )
-        # Ensure credentials directory exists
-        os.makedirs(self.credentials_dir, exist_ok=True)
+        # Ensure credentials directory exists with owner-only permissions (0700).
+        os.makedirs(self.credentials_dir, mode=0o700, exist_ok=True)
+        # makedirs не змінює права вже наявного каталогу — підстраховуємось.
+        try:
+            os.chmod(self.credentials_dir, 0o700)
+        except OSError as e:
+            logger.warning(f"Could not set permissions on credentials dir: {e}")
         self.credentials: Optional[Credentials] = None
         self._services: Dict[str, Any] = {}
 
@@ -112,9 +135,8 @@ class GoogleSheetsAuth:
             creds = Credentials.from_authorized_user_file(token_path, SHEETS_SCOPES)
             if creds and creds.expired and creds.refresh_token:
                 creds.refresh(Request())
-                # Save refreshed token
-                with open(token_path, "w") as token_file:
-                    token_file.write(creds.to_json())
+                # Save refreshed token with owner-only permissions
+                _write_secret_file(token_path, creds.to_json())
             return creds if creds and creds.valid else None
         except Exception as e:
             logger.warning(f"Failed to load OAuth token: {e}")
@@ -140,26 +162,20 @@ class GoogleSheetsAuth:
             return None
 
     def _load_default_credentials(self) -> Optional[Credentials]:
-        """Load application default credentials with proper scopes."""
+        """Load application default credentials with proper scopes.
+
+        Свідомо НЕ робимо fallback на `google.auth.default()` без scopes:
+        такі креденшіали мають невизначені/неконтрольовані права, що суперечить
+        принципу найменших привілеїв і ускладнює діагностику. Якщо ADC не
+        вдається отримати з потрібними scopes — повертаємо None.
+        """
         try:
-            # Try to load default credentials with our required scopes
             creds, project = google.auth.default(scopes=SHEETS_SCOPES)
             logger.debug(f"Loaded default credentials for project: {project}")
             return creds
         except Exception as e:
             logger.warning(f"Failed to load default credentials with scopes: {e}")
-
-            # Fallback: try without scopes (will have limited access)
-            try:
-                creds, project = google.auth.default()
-                logger.warning(
-                    f"Loaded default credentials without scopes for project: {project}. "
-                    "This may have limited API access."
-                )
-                return creds
-            except Exception as e2:
-                logger.warning(f"Failed to load any default credentials: {e2}")
-                return None
+            return None
 
     def _run_oauth_flow(self) -> Optional[Credentials]:
         """Run interactive OAuth flow."""
@@ -184,10 +200,9 @@ class GoogleSheetsAuth:
                 logger.info("Local server auth failed, trying manual flow...")
                 creds = flow.run_console()
 
-            # Save token for future use
+            # Save token for future use with owner-only permissions
             token_path = os.path.join(self.credentials_dir, "token.json")
-            with open(token_path, "w") as token_file:
-                token_file.write(creds.to_json())
+            _write_secret_file(token_path, creds.to_json())
 
             logger.info(f"OAuth token saved to {token_path}")
             return creds
@@ -252,8 +267,9 @@ class GoogleSheetsAuth:
                 return "service_account"
             else:
                 return "unknown"
-        except Exception:
+        except Exception as e:
             # If we can't get user info, try to detect from credentials type
+            logger.debug(f"Could not fetch user info for account detection: {e}")
             if hasattr(self.credentials, "service_account_email"):
                 return "service_account"
             elif hasattr(self.credentials, "refresh_token"):
@@ -271,23 +287,22 @@ class GoogleSheetsAuth:
         }
 
         try:
-            # Test Drive API access
+            # Test Drive API access (read-only: ми тримаємо лише
+            # drive.metadata.readonly, тож drive_write свідомо лишається False).
             drive_service = self.get_drive_service()
             try:
-                # Try to list files (read permission)
                 drive_service.files().list(pageSize=1).execute()
                 permissions["drive_read"] = True
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Drive read permission check failed: {e}")
 
-            # Test Sheets API access
-            sheets_service = self.get_sheets_service()
-            # Note: We can't easily test sheets permissions without a specific sheet ID
-            # So we'll assume if drive works, sheets will work
+            # Sheets: точно перевірити запис без конкретного sheet ID не можна.
+            # Якщо сервіс будується і Drive-метадані доступні — вважаємо, що
+            # scope `spreadsheets` (read+write) активний.
+            self.get_sheets_service()
             if permissions["drive_read"]:
                 permissions["sheets_read"] = True
                 permissions["sheets_write"] = True
-                permissions["drive_write"] = True
 
         except Exception as e:
             logger.debug(f"Permission check failed: {e}")

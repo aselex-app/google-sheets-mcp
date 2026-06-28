@@ -1,7 +1,9 @@
 """Interactive setup wizard for Google Sheets MCP server."""
 
 import json
+import logging
 import os
+import subprocess
 import sys
 import webbrowser
 from typing import Optional
@@ -52,7 +54,12 @@ class SetupWizard:
             auth.authenticate()
             click.echo("✅ Authentication is already configured and working!")
             return True
-        except Exception:
+        except Exception as e:
+            # Очікувано на першому запуску (креденшіалів ще немає) — не шумимо в
+            # консоль, але лишаємо слід для діагностики.
+            logging.getLogger(__name__).debug(
+                f"No working auth found during setup check: {e}"
+            )
             return False
 
     def _choose_setup_method(self) -> str:
@@ -215,13 +222,27 @@ class SetupWizard:
         click.echo("This will use your existing gcloud authentication.")
         click.echo()
 
-        # Check if gcloud is available
-        if os.system("gcloud --version > /dev/null 2>&1") != 0:
+        # Check if gcloud is available. subprocess з list-аргументами не запускає
+        # shell, тож немає ризику shell-ін'єкції; також не залежимо від $PATH-трюків.
+        def _run_gcloud(cmd_args: list) -> subprocess.CompletedProcess:
+            return subprocess.run(
+                ["gcloud", *cmd_args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+        try:
+            if _run_gcloud(["--version"]).returncode != 0:
+                raise FileNotFoundError
+        except (FileNotFoundError, OSError):
             click.echo("❌ gcloud CLI not found. Please install Google Cloud SDK.")
             return False
 
         # Check if authenticated
-        if os.system("gcloud auth list --filter=status:ACTIVE --format='value(account)' | head -1 > /dev/null 2>&1") != 0:
+        auth_check = _run_gcloud(
+            ["auth", "list", "--filter=status:ACTIVE", "--format=value(account)"]
+        )
+        if auth_check.returncode != 0:
             click.echo("❌ No active gcloud authentication found.")
             click.echo("Run: gcloud auth login")
             return False
